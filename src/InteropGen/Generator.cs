@@ -67,7 +67,7 @@ class Generator
             }
 
 
-            bool TryMapCommonType(NativeType type, bool allowStrings, out string res)
+            bool TryMapCommonType(NativeType type, bool allowStrings, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out string res)
             {
                 string? Map()
                 {
@@ -296,6 +296,11 @@ class Generator
 
                                 void GenerateHandleReturn(NativeHandle nativeHandleType)
                                 {
+                                    // Ownership follows the "New" naming rule, NOT the method/factory
+                                    // classification: a New-suffixed function whose first parameter is a
+                                    // handle is modeled as an instance method (isFactory == false) but still
+                                    // returns a freshly-created, caller-owned handle. Using isFactory here
+                                    // would emit RetainFromNative for those and over-retain (leak).
                                     if (f.Name.EndsWith("New"))
                                         gen.Line($"return new {nativeHandleType.Name}(ret);");
                                     else
@@ -308,7 +313,13 @@ class Generator
                                         GenerateHandleReturn(nativeHandle);
                                     else if(f.ReturnType is NativeNullableType { ElementType: NativeHandle nativeHandleType})
                                     {
-                                        gen.Line("if(ret == null) return null;");
+                                        // Mirror GenerateHandleReturn's New-based branch: New-suffixed
+                                        // functions return a SafeHandle from P/Invoke (compare to null);
+                                        // other handle-returning functions return a raw IntPtr (compare to IntPtr.Zero).
+                                        if (f.Name.EndsWith("New"))
+                                            gen.Line("if(ret == null) return null;");
+                                        else
+                                            gen.Line("if(ret == global::System.IntPtr.Zero) return null;");
                                         GenerateHandleReturn(nativeHandleType);
                                     }
                                     else
